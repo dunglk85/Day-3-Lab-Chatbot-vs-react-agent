@@ -45,30 +45,99 @@ class ReActAgent:
         """
         logger.log_event("AGENT_START", {"input": user_input, "model": self.llm.model_name})
         
-        current_prompt = user_input
+        system_prompt = self.get_system_prompt()
+        current_prompt = user_input.strip()
         steps = 0
+        final_answer = None
 
         while steps < self.max_steps:
-            # TODO: Generate LLM response
-            # result = self.llm.generate(current_prompt, system_prompt=self.get_system_prompt())
-            
-            # TODO: Parse Thought/Action from result
-            
-            # TODO: If Action found -> Call tool -> Append Observation
-            
-            # TODO: If Final Answer found -> Break loop
-            
+            result = self.llm.generate(current_prompt, system_prompt=system_prompt)
+            content = result.get("content", "").strip()
+            logger.log_event("LLM_RESPONSE", {
+                "step": steps + 1,
+                "content": content,
+                "provider": result.get("provider"),
+                "latency_ms": result.get("latency_ms"),
+                "usage": result.get("usage")
+            })
+
+            final_answer = self._parse_final_answer(content)
+            if final_answer:
+                logger.log_event("AGENT_FINAL_ANSWER", {"final_answer": final_answer, "steps": steps + 1})
+                break
+
+            action = self._parse_action(content)
+            if action is None:
+                logger.log_event("AGENT_NO_ACTION", {"step": steps + 1, "content": content})
+                final_answer = content
+                break
+
+            tool_output = self._execute_tool(action["tool_name"], action["args"])
+            logger.log_event("TOOL_EXECUTION", {
+                "tool_name": action["tool_name"],
+                "args": action["args"],
+                "output": tool_output
+            })
+
+            current_prompt = (
+                f"{current_prompt}\n"
+                f"Thought: {action.get('thought', '').strip()}\n"
+                f"Action: {action['tool_name']}({action['args']})\n"
+                f"Observation: {tool_output}"
+            )
+
             steps += 1
-            
-        logger.log_event("AGENT_END", {"steps": steps})
-        return "Not implemented. Fill in the TODOs!"
+
+        if final_answer is None:
+            final_answer = "Agent stopped after reaching max steps without a final answer."
+            logger.log_event("AGENT_MAX_STEPS", {"max_steps": self.max_steps})
+
+        logger.log_event("AGENT_END", {"steps": steps, "final_answer": final_answer})
+        return final_answer
+
+    def _parse_action(self, text: str) -> Optional[Dict[str, str]]:
+        """
+        Parse the first Action from the model output.
+        Expected format: Action: tool_name(arguments)
+        """
+        action_pattern = r"Action\s*:\s*([A-Za-z0-9_]+)\s*\((.*?)\)"
+        match = re.search(action_pattern, text, re.IGNORECASE | re.DOTALL)
+        if not match:
+            return None
+
+        thought_match = re.search(r"Thought\s*:\s*(.*?)(?:\n|$)", text, re.IGNORECASE)
+        thought = thought_match.group(1).strip() if thought_match else ""
+        tool_name = match.group(1).strip()
+        args = match.group(2).strip()
+
+        return {
+            "tool_name": tool_name,
+            "args": args,
+            "thought": thought
+        }
+
+    def _parse_final_answer(self, text: str) -> Optional[str]:
+        """
+        Parse the Final Answer from the model output.
+        Expected format: Final Answer: your final response.
+        """
+        final_pattern = r"Final Answer\s*:\s*(.+)"
+        match = re.search(final_pattern, text, re.IGNORECASE | re.DOTALL)
+        if not match:
+            return None
+        return match.group(1).strip()
 
     def _execute_tool(self, tool_name: str, args: str) -> str:
         """
         Helper method to execute tools by name.
         """
         for tool in self.tools:
-            if tool['name'] == tool_name:
-                # TODO: Implement dynamic function calling or simple if/else
-                return f"Result of {tool_name}"
+            if tool["name"] == tool_name:
+                tool_fn = tool.get("function") or tool.get("execute") or tool.get("implementation")
+                if callable(tool_fn):
+                    try:
+                        return tool_fn(args)
+                    except Exception as exc:
+                        return f"Error executing {tool_name}: {exc}"
+                return tool.get("output", f"Tool {tool_name} has no callable implementation.")
         return f"Tool {tool_name} not found."
