@@ -98,5 +98,12 @@ def run_chatbot_evaluation():
     print("\n" + "="*80)
     return results
 
+def simple_chatbot_response(query: str) -> str:
+    """Helper function to get chatbot response for a query"""
+    llm = OpenAIProvider(api_key=os.getenv("OPENAI_API_KEY"))
+    chatbot = SimpleChatbot(llm)
+    return chatbot.chat(query)
+
 if __name__ == "__main__":
-    run_chatbot_evaluation()
+    # run_chatbot_evaluation()
+    print(simple_chatbot_response("What is the price of iPhone 15?"))
