@@ -50,10 +50,10 @@ class ReActAgent:
 
         while steps < self.max_steps:
             # TODO: Generate LLM response
-            # result = self.llm.generate(current_prompt, system_prompt=self.get_system_prompt())
-            
+            result = self.llm.generate(current_prompt, system_prompt=self.get_system_prompt())
+            self.history.append({"input": current_prompt, "output": result})
             # TODO: Parse Thought/Action from result
-            
+        
             # TODO: If Action found -> Call tool -> Append Observation
             
             # TODO: If Final Answer found -> Break loop

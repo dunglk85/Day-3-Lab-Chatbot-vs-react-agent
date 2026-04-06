@@ -1,0 +1,47 @@
+@startuml
+start
+
+:User Input;
+note right
+Ví dụ:
+"Tôi muốn mua điện thoại
+giá từ 5tr đến 10tr"
+end note
+
+partition "Understand Query" {
+  :Thought: Phân tích yêu cầu user;
+  :Extract: price_range, nhu cầu, brand?;
+}
+
+partition "Check Info" {
+  if (Thiếu thông tin?) then (Yes)
+    :Thought: Cần hỏi thêm;
+    :Action: ask_user_for_more_info();
+    :Observation: User trả lời bổ sung;
+  else (No)
+  endif
+}
+
+partition "Search Products" {
+  :Thought: Tìm điện thoại phù hợp;
+  :Action: search_phone(price_range, criteria);
+  :Observation: Danh sách sản phẩm;
+}
+
+partition "Filter & Rank" {
+  :Thought: Lọc & xếp hạng theo nhu cầu;
+  :Action: filter_rank(products);
+  :Observation: Top N sản phẩm;
+}
+
+partition "Explain Recommendation" {
+  :Thought: Giải thích vì sao phù hợp;
+  :Generate: mô tả + so sánh;
+}
+
+partition "Return Result" {
+  :Output: Danh sách gợi ý cho user;
+}
+
+stop
+@enduml
