@@ -115,6 +115,20 @@ with col_button3:
     if st.button("📊 History", use_container_width=True):
         st.session_state.show_history = not st.session_state.get("show_history", False)
 
+# Initialize variables to avoid NameError
+if "agent_success" not in st.session_state:
+    st.session_state.agent_success = None
+if "final_answer_text" not in st.session_state:
+    st.session_state.final_answer_text = ""
+if "steps_list" not in st.session_state:
+    st.session_state.steps_list = []
+if "chatbot_time" not in st.session_state:
+    st.session_state.chatbot_time = 0
+if "agent_time" not in st.session_state:
+    st.session_state.agent_time = 0
+if "chatbot_result" not in st.session_state:
+    st.session_state.chatbot_result = ""
+
 # ============================================================
 # COMPARISON RESULTS
 # ============================================================
@@ -153,19 +167,55 @@ if run_comparison and user_input.strip():
                 agent_time = time.time() - start_time
                 agent_success = True
             except Exception as e:
-                agent_result = f"❌ Error: {str(e)}"
+                agent_result = {
+                    "final_answer": f"❌ Error: {str(e)}",
+                    "steps": [],
+                    "total_steps": 0
+                }
                 agent_time = time.time() - start_time
                 agent_success = False
+        
+        # Extract final answer
+        if isinstance(agent_result, dict):
+            final_answer_text = agent_result.get("final_answer", "")
+            steps_list = agent_result.get("steps", [])
+            total_steps = agent_result.get("total_steps", 0)
+        else:
+            # Backward compatibility for old string return
+            final_answer_text = agent_result
+            steps_list = []
+            total_steps = 0
+        
+        # Store in session state for use in history section
+        st.session_state.final_answer_text = final_answer_text
+        st.session_state.steps_list = steps_list
+        st.session_state.agent_success = agent_success
+        st.session_state.chatbot_time = chatbot_time
+        st.session_state.agent_time = agent_time
+        st.session_state.chatbot_result = chatbot_result
         
         # Display result
         status_text = "✅ Response" if agent_success else "❌ Error"
         st.markdown(f"<div class='success'>{status_text} ({agent_time:.2f}s)</div>", unsafe_allow_html=True)
-        st.info(agent_result)
+        st.info(final_answer_text)
+        
+        # Display reasoning steps
+        if steps_list:
+            st.markdown("#### 🧠 Reasoning Process")
+            for i, step in enumerate(steps_list, 1):
+                with st.expander(f"📌 Step {i}: {step['action'][:50]}..."):
+                    st.markdown("**💭 Thought:**")
+                    st.markdown(f"> {step['thought']}")
+                    
+                    st.markdown("**⚡ Action:**")
+                    st.code(step['action'], language="text")
+                    
+                    st.markdown("**👁️ Observation:**")
+                    st.markdown(f"> {step['observation']}")
         
         # Metrics
-        max_steps_used = min(st.session_state.agent.max_steps, 5)  # Display actual steps used
         st.metric("Response Time", f"{agent_time:.2f}s")
-        st.metric("Max Steps", max_steps_used)
+        st.metric("Steps Used", f"{total_steps}/{st.session_state.agent.max_steps}")
     
     # ============================================================
     # WINNER ANNOUNCEMENT
@@ -175,7 +225,9 @@ if run_comparison and user_input.strip():
     col_winner1, col_winner2, col_winner3 = st.columns(3)
     
     with col_winner2:
-        if agent_success and not chatbot_result.startswith("I'm unable"):
+        chatbot_result = st.session_state.chatbot_result
+        agent_success = st.session_state.agent_success
+        if agent_success and isinstance(chatbot_result, str) and not chatbot_result.startswith("I'm unable"):
             st.success("🏆 Agent wins with practical tool usage!")
         elif not agent_success and chatbot_result:
             st.info("Chatbot provided a response, Agent encountered issues.")
@@ -185,20 +237,21 @@ if run_comparison and user_input.strip():
     # Store in history
     st.session_state.history.append({
         "query": user_input,
-        "chatbot_result": chatbot_result[:100],
-        "agent_result": agent_result[:100],
-        "chatbot_time": chatbot_time,
-        "agent_time": agent_time,
+        "chatbot_result": str(st.session_state.chatbot_result)[:100] if st.session_state.chatbot_result else "",
+        "agent_result": str(st.session_state.final_answer_text)[:100] if st.session_state.final_answer_text else "",
+        "agent_steps": st.session_state.steps_list,
+        "chatbot_time": st.session_state.chatbot_time,
+        "agent_time": st.session_state.agent_time,
         "timestamp": time.time()
     })
     
     # Log to telemetry
     logger.log_event("UI_COMPARISON", {
         "query": user_input,
-        "chatbot_response_length": len(chatbot_result),
-        "agent_response_length": len(agent_result),
-        "chatbot_time": chatbot_time,
-        "agent_time": agent_time
+        "chatbot_response_length": len(str(st.session_state.chatbot_result)) if st.session_state.chatbot_result else 0,
+        "agent_response_length": len(str(st.session_state.final_answer_text)) if st.session_state.final_answer_text else 0,
+        "chatbot_time": st.session_state.chatbot_time,
+        "agent_time": st.session_state.agent_time
     })
 
 # ============================================================
@@ -222,6 +275,16 @@ if st.session_state.get("show_history", False) and st.session_state.history:
                 st.write("**Agent:**")
                 st.caption(f"⏱️ {entry['agent_time']:.2f}s")
                 st.write(entry['agent_result'])
+                
+                # Show steps if available
+                if entry.get('agent_steps') and isinstance(entry['agent_steps'], list):
+                    st.caption(f"📌 {len(entry['agent_steps'])} steps")
+                    for step in entry['agent_steps']:
+                        if isinstance(step, dict) and 'step_number' in step:
+                            with st.expander(f"Step {step['step_number']}: {step.get('action', '')[:40]}..."):
+                                st.markdown(f"**💭 Thought:** {step.get('thought', '')}")
+                                st.markdown(f"**⚡ Action:** `{step.get('action', '')}`")
+                                st.markdown(f"**👁️ Observation:** {step.get('observation', '')}")
 
 # ============================================================
 # FOOTER
