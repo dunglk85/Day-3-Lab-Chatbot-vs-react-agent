@@ -1,4 +1,5 @@
 import os
+import time
 import streamlit as st
 from dotenv import load_dotenv
 
@@ -51,6 +52,8 @@ elif provider_option == "Gemini":
     st.caption("If you get 404 model not found, try another available Gemini model for your API key.")
 
 run_button = st.button("Recommend")
+
+total_runtime_ms = 0  # Initialize to avoid NameError
 
 if run_button:
     if not user_query.strip():
@@ -106,7 +109,21 @@ if run_button:
             st.subheader("Summary")
             st.metric("Steps", response.get("steps", 0))
             st.metric("Recommendations", len(response.get("recommendations", [])))
+            st.metric("Total Runtime", f"{total_runtime_ms} ms")
             st.markdown("**Provider**: {}".format(provider_option))
+
+            llm_metrics = response.get("llm_metrics", {})
+            if llm_metrics:
+                st.markdown("---")
+                st.subheader("LLM Metrics")
+                st.metric("LLM Calls", llm_metrics.get("calls", 0))
+                st.metric("LLM Total Latency", f"{llm_metrics.get('total_latency_ms', 0)} ms")
+                st.metric("Average LLM Latency", f"{llm_metrics.get('average_latency_ms', 0)} ms")
+                st.metric("Total Tokens", llm_metrics.get("total_tokens", 0))
+                st.markdown(
+                    f"- Prompt tokens: {llm_metrics.get('prompt_tokens', 0)}  \n"
+                    f"- Completion tokens: {llm_metrics.get('completion_tokens', 0)}"
+                )
 
         if response.get("recommendations"):
             st.subheader("Recommendations")

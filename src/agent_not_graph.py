@@ -53,6 +53,12 @@ class AgentState(BaseModel):
     needs_clarification: bool = False
     final_answer: str = ""
     clarification_loops: int = 0
+    llm_calls: int = 0
+    llm_total_latency_ms: int = 0
+    llm_prompt_tokens: int = 0
+    llm_completion_tokens: int = 0
+    llm_total_tokens: int = 0
+    llm_call_history: List[Dict[str, Any]] = Field(default_factory=list)
 
 
 # ============================================================================
@@ -145,6 +151,24 @@ class ProductRecommendationAgent:
     # Workflow Nodes (Step Functions)
     # ========================================================================
     
+    def _record_llm_metrics(self, state: AgentState, result: Dict[str, Any], step_name: str) -> AgentState:
+        """Record LLM usage and latency for each generation step."""
+        usage = result.get("usage", {}) or {}
+        latency_ms = result.get("latency_ms", 0) or 0
+        state.llm_calls += 1
+        state.llm_total_latency_ms += latency_ms
+        state.llm_prompt_tokens += usage.get("prompt_tokens", 0)
+        state.llm_completion_tokens += usage.get("completion_tokens", 0)
+        state.llm_total_tokens += usage.get("total_tokens", 0)
+        state.llm_call_history.append({
+            "step": step_name,
+            "latency_ms": latency_ms,
+            "prompt_tokens": usage.get("prompt_tokens", 0),
+            "completion_tokens": usage.get("completion_tokens", 0),
+            "total_tokens": usage.get("total_tokens", 0)
+        })
+        return state
+
     def _understand_query(self, state: AgentState) -> AgentState:
         """Step 1: Parse and extract query information"""
         logger.log_event("NODE_UNDERSTAND_QUERY", {"input": state.user_input})
@@ -165,6 +189,7 @@ class ProductRecommendationAgent:
         Return JSON with keys: product_type, price_min, price_max, requirements (list), brand_preference"""
         
         result = self.llm.generate(prompt, system_prompt=system_prompt)
+        state = self._record_llm_metrics(state, result, "understand_query")
         response_text = result["content"]
         
         # Try to extract JSON
@@ -246,6 +271,7 @@ class ProductRecommendationAgent:
         Original query: "{state.user_input}" """
         
         result = self.llm.generate(prompt, system_prompt=system_prompt)
+        state = self._record_llm_metrics(state, result, "ask_clarification")
         question = result["content"]
         
         # Simulate user providing clarification
@@ -390,6 +416,7 @@ Explain why these are the best recommendations for this user.
 Highlight unique features and value propositions."""
         
         result = self.llm.generate(prompt, system_prompt=system_prompt)
+        state = self._record_llm_metrics(state, result, "explain_recommendation")
         state.explanation = result["content"]
         
         state.history.append({
@@ -516,6 +543,16 @@ User Query: {state.user_input}
     
     def _prepare_result(self, state: AgentState) -> Dict[str, Any]:
         """Prepare the final result dictionary"""
+        llm_metrics = {
+            "calls": state.llm_calls,
+            "total_latency_ms": state.llm_total_latency_ms,
+            "average_latency_ms": int(state.llm_total_latency_ms / state.llm_calls) if state.llm_calls else 0,
+            "prompt_tokens": state.llm_prompt_tokens,
+            "completion_tokens": state.llm_completion_tokens,
+            "total_tokens": state.llm_total_tokens,
+            "call_history": state.llm_call_history
+        }
+
         return {
             "user_input": state.user_input,
             "recommendations": [p.dict() for p in state.recommendations],
@@ -523,7 +560,8 @@ User Query: {state.user_input}
             "final_answer": state.final_answer,
             "steps": state.step_count,
             "clarification_loops": state.clarification_loops,
-            "history": state.history
+            "history": state.history,
+            "llm_metrics": llm_metrics
         }
 
 
